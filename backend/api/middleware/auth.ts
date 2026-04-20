@@ -2,13 +2,7 @@ import type {NextFunction, Request, Response} from 'express';
 
 import {getSupabaseAdmin} from '../supabase';
 
-declare global {
-  namespace Express {
-    interface Request {
-      userId?: string;
-    }
-  }
-}
+type AuthedRequest = Request & {userId?: string};
 
 export async function requireUser(
   req: Request,
@@ -30,6 +24,6 @@ export async function requireUser(
     return;
   }
 
-  req.userId = data.user.id;
+  (req as AuthedRequest).userId = data.user.id;
   next();
 }

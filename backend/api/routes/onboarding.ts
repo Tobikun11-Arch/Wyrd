@@ -17,14 +17,35 @@ type TranscriptMessage = {
   created_at: string;
 };
 
+type AuthedRequest = Express.Request & {userId?: string};
+
+type PostgrestResult<T> = Promise<{data: T | null; error: unknown}>;
+
+type TableQuery<T> = {
+  insert: (values: unknown) => TableQuery<T>;
+  select: (columns: string) => TableQuery<T> & PostgrestResult<T>;
+  single: () => PostgrestResult<T>;
+  eq: (column: string, value: unknown) => TableQuery<T>;
+  order: (
+    column: string,
+    options: {ascending: boolean}
+  ) => TableQuery<T> & PostgrestResult<T>;
+  update: (values: unknown) => TableQuery<T> & PostgrestResult<T>;
+};
+
+type SupabaseLike = {
+  from: <T>(table: string) => TableQuery<T>;
+};
+
 const router = Router();
 
 router.post('/session', requireUser, async (req, res) => {
-  const userId = req.userId as string;
+  const userId = (req as AuthedRequest).userId as string;
   const supabaseAdmin = getSupabaseAdmin();
+  const db = supabaseAdmin as unknown as SupabaseLike;
 
-  const {data, error} = await (supabaseAdmin as any)
-    .from('onboarding_sessions')
+  const {data, error} = await db
+    .from<{id: string}>('onboarding_sessions')
     .insert({user_id: userId, status: 'in_progress'})
     .select('id')
     .single();
@@ -38,8 +59,8 @@ router.post('/session', requireUser, async (req, res) => {
 });
 
 router.post('/message', requireUser, async (req, res) => {
-  const userId = req.userId as string;
   const supabaseAdmin = getSupabaseAdmin();
+  const db = supabaseAdmin as unknown as SupabaseLike;
   const openai = getOpenAI();
   const {sessionId, content, traits} = req.body as {
     sessionId: string;
@@ -52,14 +73,12 @@ router.post('/message', requireUser, async (req, res) => {
     return;
   }
 
-  await (supabaseAdmin as any).from('onboarding_messages').insert({
-    session_id: sessionId,
-    role: 'user',
-    content
-  });
+  await db
+    .from<unknown>('onboarding_messages')
+    .insert({session_id: sessionId, role: 'user', content});
 
-  const {data: transcript} = await (supabaseAdmin as any)
-    .from('onboarding_messages')
+  const {data: transcript} = await db
+    .from<TranscriptMessage[]>('onboarding_messages')
     .select('role,content,created_at')
     .eq('session_id', sessionId)
     .order('created_at', {ascending: true});
@@ -88,7 +107,7 @@ router.post('/message', requireUser, async (req, res) => {
   const assistantMessage =
     completion.choices[0]?.message?.content?.trim() ?? 'Tell me more.';
 
-  await (supabaseAdmin as any).from('onboarding_messages').insert({
+  await db.from<unknown>('onboarding_messages').insert({
     session_id: sessionId,
     role: 'assistant',
     content: assistantMessage
@@ -127,8 +146,9 @@ router.post('/message', requireUser, async (req, res) => {
 });
 
 router.post('/complete', requireUser, async (req, res) => {
-  const userId = req.userId as string;
+  const userId = (req as AuthedRequest).userId as string;
   const supabaseAdmin = getSupabaseAdmin();
+  const db = supabaseAdmin as unknown as SupabaseLike;
   const openai = getOpenAI();
   const {sessionId, traits} = req.body as {
     sessionId: string;
@@ -140,8 +160,8 @@ router.post('/complete', requireUser, async (req, res) => {
     return;
   }
 
-  const {data: transcript} = await (supabaseAdmin as any)
-    .from('onboarding_messages')
+  const {data: transcript} = await db
+    .from<TranscriptMessage[]>('onboarding_messages')
     .select('role,content,created_at')
     .eq('session_id', sessionId)
     .order('created_at', {ascending: true});
@@ -185,8 +205,8 @@ router.post('/complete', requireUser, async (req, res) => {
 
   const displayName = payload.display_name ?? traits?.display_name ?? 'Agent';
 
-  const {error: agentError} = await (supabaseAdmin as any)
-    .from('agents')
+  const {error: agentError} = await db
+    .from<unknown>('agents')
     .insert({
       user_id: userId,
       display_name: displayName,
@@ -195,15 +215,16 @@ router.post('/complete', requireUser, async (req, res) => {
       persona_prompt: payload.persona_prompt ?? '',
       traits: payload.traits ?? {},
       dealbreakers: payload.dealbreakers ?? traits?.dealbreakers ?? null
-    });
+    })
+    .select('id');
 
   if (agentError) {
     res.status(500).json({error: 'failed_to_create_agent'});
     return;
   }
 
-  await (supabaseAdmin as any)
-    .from('onboarding_sessions')
+  await db
+    .from<unknown>('onboarding_sessions')
     .update({status: 'completed'})
     .eq('id', sessionId)
     .eq('user_id', userId);
