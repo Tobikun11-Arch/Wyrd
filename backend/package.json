@@ -6,9 +6,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch index.ts",
-    "start": "node dist/index.js",
-    "lint": "eslint . --ext .ts",
-    "test": "jest --passWithNoTests"
+    "start": "node dist/index.js"
   },
   "keywords": [],
   "author": "",
